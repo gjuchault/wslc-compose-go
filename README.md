@@ -116,16 +116,19 @@ Supported: `image`, `build` (context, dockerfile, args, target, pull), `command`
 `entrypoint`, `container_name`, `environment`, `env_file`, `ports` (short/long syntax,
 ranges, `ip:host:container`, `/udp`), `volumes` (bind, named, tmpfs, Windows paths like
 `E:\data:/srv:ro`), `tmpfs`, `networks` (several per service, with `aliases`, external),
-`depends_on`, `hostname`, `domainname`, `dns*`, `user`, `working_dir`, `labels`,
+`depends_on` (with the `service_healthy` and `service_completed_successfully` conditions),
+`healthcheck`, `hostname`, `domainname`, `dns*`, `user`, `working_dir`, `labels`,
 `mem_limit`, `cpus`, `shm_size`, `ulimits`, `stop_signal`, `gpus`, `stdin_open`, `tty`,
 `profiles`, `deploy.replicas`, `deploy.resources.limits`, GPU device reservations.
 
-A service on several networks is created, connected to each one, then started.
+wslc runs health tests with the shell: the exec form `["CMD", "a", "b"]` is quoted into a
+shell command, so the image needs `/bin/sh`. A service on several networks is created,
+connected to each one, then started.
 
-Accepted with a warning (wslc cannot enforce them): `healthcheck`, `restart`, `cap_add`,
+Accepted with a warning (wslc cannot enforce them): `restart`, `cap_add`,
 `cap_drop`, `privileged`, `devices`, `extra_hosts`, `sysctls`, `secrets`, `configs`,
-`init`, `pid`, `ipc`, `read_only`, `security_opt`, `logging`, and `depends_on`
-conditions other than `service_started`.
+`init`, `pid`, `ipc`, `read_only`, `security_opt`, `logging`, healthcheck
+`start_interval`, and unknown `depends_on` conditions.
 
 Interpolation: `$VAR`, `${VAR}`, `${VAR:-default}`, `${VAR-default}`, `${VAR:+alt}`,
 `${VAR+alt}`, `${VAR:?error}`, `${VAR?error}`, `$$` — from `.env` (or `--env-file`), with

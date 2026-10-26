@@ -6,6 +6,9 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
+
+	"wslc-go/internal/compose"
 )
 
 // callWith reports whether a call contains every part.
@@ -76,6 +79,52 @@ func TestUpRemovesContainerWhenConnectFails(t *testing.T) {
 	}
 	if got := calls(); !anyCall(got, "remove -f demo-web-1") || anyCall(got, "start") {
 		t.Errorf("a half-connected container must be removed, not started: %q", got)
+	}
+}
+
+func TestConditionMet(t *testing.T) {
+	healthcheck := map[string]any{"Healthcheck": map[string]any{"Test": []any{"CMD-SHELL", "true"}}}
+	state := func(s map[string]any) map[string]any { return map[string]any{"State": s, "Config": healthcheck} }
+	cases := []struct {
+		name      string
+		condition string
+		data      map[string]any
+		done      bool
+		errPart   string
+	}{
+		{"healthy", compose.ConditionHealthy, state(map[string]any{"Running": true, "Health": map[string]any{"Status": "healthy"}}), true, ""},
+		{"starting", compose.ConditionHealthy, state(map[string]any{"Running": true, "Health": map[string]any{"Status": "starting"}}), false, ""},
+		{"not checked yet", compose.ConditionHealthy, state(map[string]any{"Running": true}), false, ""},
+		{"unhealthy", compose.ConditionHealthy, state(map[string]any{"Running": true, "Health": map[string]any{"Status": "unhealthy"}}), false, "unhealthy"},
+		{"exited", compose.ConditionHealthy, state(map[string]any{"Running": false, "Status": "exited", "ExitCode": 1.0, "Health": map[string]any{"Status": "starting"}}), false, "exited (1)"},
+		{"no healthcheck", compose.ConditionHealthy, map[string]any{"State": map[string]any{"Running": true}}, false, "no healthcheck"},
+		{"healthcheck NONE", compose.ConditionHealthy, map[string]any{"State": map[string]any{"Running": true},
+			"Config": map[string]any{"Healthcheck": map[string]any{"Test": []any{"NONE"}}}}, false, "no healthcheck"},
+		{"running", compose.ConditionCompleted, state(map[string]any{"Running": true}), false, ""},
+		{"exit 0", compose.ConditionCompleted, state(map[string]any{"Running": false, "ExitCode": 0.0}), true, ""},
+		{"exit 3", compose.ConditionCompleted, state(map[string]any{"Running": false, "ExitCode": 3.0}), false, "exit 3"},
+	}
+	for _, c := range cases {
+		done, err := conditionMet("x", c.condition, c.data)
+		if done != c.done || (err == nil) != (c.errPart == "") || (err != nil && !strings.Contains(err.Error(), c.errPart)) {
+			t.Errorf("%s: done=%v err=%v", c.name, done, err)
+		}
+	}
+}
+
+func TestWaitForContainerPolls(t *testing.T) {
+	statuses := []string{"starting", "starting", "healthy"}
+	calls := 0
+	oldInspect, oldInterval := inspectFn, pollInterval
+	t.Cleanup(func() { inspectFn, pollInterval = oldInspect, oldInterval })
+	pollInterval = time.Millisecond
+	inspectFn = func(string) (map[string]any, error) {
+		status := statuses[min(calls, len(statuses)-1)]
+		calls++
+		return map[string]any{"State": map[string]any{"Running": true, "Health": map[string]any{"Status": status}}}, nil
+	}
+	if err := waitForContainer("db", compose.ConditionHealthy); err != nil || calls != 3 {
+		t.Errorf("err=%v calls=%d", err, calls)
 	}
 }
 

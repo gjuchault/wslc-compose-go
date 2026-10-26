@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"wslc-go/internal/compose"
 	"wslc-go/internal/engine"
@@ -198,6 +199,15 @@ func (g *globals) converge(project *compose.Project, services []*compose.Service
 		if svc.ContainerName != "" && replicas > 1 {
 			return nil, &compose.ComposeError{Msg: svc.Name + ": cannot scale a service with container_name set"}
 		}
+		// wait for the dependencies only when a container is to be started
+		waited := false
+		waitDeps := func() error {
+			if waited {
+				return nil
+			}
+			waited = true
+			return waitForDependencies(project, svc, o.replicas, g.dryRun)
+		}
 		desiredHash := svc.ConfigHash()
 		for index := 1; index <= replicas; index++ {
 			cname := project.ContainerName(svc, index)
@@ -208,6 +218,9 @@ func (g *globals) converge(project *compose.Project, services []*compose.Service
 				if fresh && current.Running {
 					info("Container " + cname + " is up-to-date")
 					continue
+				}
+				if err := waitDeps(); err != nil {
+					return nil, err
 				}
 				if fresh {
 					info("Starting " + cname + " ...")
@@ -227,6 +240,9 @@ func (g *globals) converge(project *compose.Project, services []*compose.Service
 					return nil, err
 				}
 			} else {
+				if err := waitDeps(); err != nil {
+					return nil, err
+				}
 				info("Creating " + cname + " ...")
 			}
 			if err := g.createContainer(project, svc, index); err != nil {
@@ -283,4 +299,101 @@ func (g *globals) createConnected(createArgs []string, svc *compose.Service, nam
 		}
 	}
 	return nil
+}
+
+// overridable in tests
+var (
+	pollInterval = time.Second
+	inspectFn    = engine.Inspect
+)
+
+// waitForDependencies blocks until every replica of the dependencies of svc
+// declared with condition service_healthy is healthy, and with
+// service_completed_successfully has exited with status 0.
+func waitForDependencies(project *compose.Project, svc *compose.Service, replicas func(*compose.Service) int, dryRun bool) error {
+	for _, depName := range svc.DependsOn {
+		condition := svc.DependsOnConditions[depName]
+		dep := project.Services[depName]
+		if condition == "" || dep == nil {
+			continue
+		}
+		for index := 1; index <= replicas(dep); index++ {
+			name := project.ContainerName(dep, index)
+			if dryRun {
+				info(fmt.Sprintf("Waiting for %s (%s)", name, condition))
+				continue
+			}
+			if err := waitForContainer(name, condition); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func waitForContainer(name, condition string) error {
+	announced := false
+	for {
+		data, err := inspectFn(name)
+		if err != nil {
+			return fmt.Errorf("dependency %s: %w", name, err)
+		}
+		done, err := conditionMet(name, condition, data)
+		if done || err != nil {
+			if announced && err == nil {
+				info("Container " + name + " is " + map[string]string{
+					compose.ConditionHealthy:   "healthy",
+					compose.ConditionCompleted: "done",
+				}[condition])
+			}
+			return err
+		}
+		if !announced {
+			info("Waiting for " + name + " ...")
+			announced = true
+		}
+		select {
+		case <-engine.Interrupted():
+			return engine.ErrInterrupted
+		case <-time.After(pollInterval):
+		}
+	}
+}
+
+// conditionMet checks a depends_on condition against inspect data; a
+// condition that can no longer be met is an error.
+func conditionMet(name, condition string, data map[string]any) (bool, error) {
+	state, _ := data["State"].(map[string]any)
+	running, _ := state["Running"].(bool)
+	exitCode, _ := state["ExitCode"].(float64)
+	switch condition {
+	case compose.ConditionCompleted:
+		if running {
+			return false, nil
+		}
+		if exitCode != 0 {
+			return false, fmt.Errorf("dependency %s did not complete successfully: exit %d", name, int(exitCode))
+		}
+		return true, nil
+	case compose.ConditionHealthy:
+		health, _ := state["Health"].(map[string]any)
+		if health == nil {
+			config, _ := data["Config"].(map[string]any)
+			hc, _ := config["Healthcheck"].(map[string]any)
+			if test, _ := hc["Test"].([]any); len(test) == 0 || str(test[0]) == "NONE" {
+				return false, fmt.Errorf("dependency %s has no healthcheck configured", name)
+			}
+		}
+		switch str(health["Status"]) {
+		case "healthy":
+			return true, nil
+		case "unhealthy":
+			return false, fmt.Errorf("dependency %s is unhealthy", name)
+		}
+		if !running && str(state["Status"]) != "created" {
+			return false, fmt.Errorf("dependency %s exited (%d) before becoming healthy", name, int(exitCode))
+		}
+		return false, nil
+	}
+	return true, nil
 }

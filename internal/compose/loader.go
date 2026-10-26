@@ -19,7 +19,6 @@ var ComposeFilenames = []string{
 
 // compose keys we accept but wslc cannot enforce (yet)
 var unsupportedKeys = []struct{ key, message string }{
-	{"healthcheck", "healthchecks are not supported by wslc; depends_on conditions fall back to 'started'"},
 	{"cap_add", "capabilities are not configurable with wslc"},
 	{"cap_drop", "capabilities are not configurable with wslc"},
 	{"privileged", "privileged mode is not supported by wslc"},
@@ -353,28 +352,85 @@ func resolveBindSource(source, projectDir string) string {
 	return source
 }
 
-func parseDependsOn(v any) ([]string, []string, error) {
+// parseDependsOn returns the dependencies, the conditions to wait for (other
+// than service_started) and warnings.
+func parseDependsOn(v any) ([]string, map[string]string, []string, error) {
 	switch x := v.(type) {
 	case nil:
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	case []any:
-		return asList(x), nil, nil
+		return asList(x), nil, nil, nil
 	case *Mapping:
 		var deps, warnings []string
+		conditions := map[string]string{}
 		for _, name := range x.Keys {
 			deps = append(deps, name)
 			condition := "service_started"
 			if cfg := asMap(x.Values[name]); cfg.Has("condition") {
 				condition = scalar(cfg.Get("condition"))
 			}
-			if condition != "service_started" {
+			switch condition {
+			case "service_started":
+			case ConditionHealthy, ConditionCompleted:
+				conditions[name] = condition
+			default:
 				warnings = append(warnings, fmt.Sprintf(
-					"depends_on condition %q on %q is treated as service_started", condition, name))
+					"unknown depends_on condition %q on %q is treated as service_started", condition, name))
 			}
 		}
-		return deps, warnings, nil
+		if len(conditions) == 0 {
+			conditions = nil
+		}
+		return deps, conditions, warnings, nil
 	}
-	return nil, nil, errorf("depends_on: expected list or mapping")
+	return nil, nil, nil, errorf("depends_on: expected list or mapping")
+}
+
+// parseHealthcheck reads a healthcheck. wslc only takes a shell command, so
+// the exec form ["CMD", ...] is quoted into one.
+func parseHealthcheck(v any, where string) (*Healthcheck, []string, error) {
+	m, err := expectMap(v, where)
+	if err != nil {
+		return nil, nil, err
+	}
+	hc := &Healthcheck{
+		Interval:    scalar(m.Get("interval")),
+		Timeout:     scalar(m.Get("timeout")),
+		StartPeriod: scalar(m.Get("start_period")),
+	}
+	var warnings []string
+	if truthy(m.Get("disable")) {
+		return &Healthcheck{Disable: true}, nil, nil
+	}
+	switch test := m.Get("test").(type) {
+	case nil:
+	case []any:
+		items := asList(test)
+		switch {
+		case len(items) == 0:
+		case items[0] == "NONE":
+			return &Healthcheck{Disable: true}, nil, nil
+		case items[0] == "CMD-SHELL" && len(items) > 1:
+			hc.Test = strings.Join(items[1:], " ")
+		case items[0] == "CMD" && len(items) > 1:
+			hc.Test = shellJoin(items[1:])
+		default:
+			return nil, nil, errorf("%s.test: expected [\"CMD\", ...], [\"CMD-SHELL\", \"command\"] or [\"NONE\"]", where)
+		}
+	default:
+		hc.Test = scalar(test)
+	}
+	if m.Has("retries") {
+		n, err := strconv.Atoi(scalar(m.Get("retries")))
+		if err != nil || n < 0 {
+			return nil, nil, errorf("%s.retries: expected a non-negative integer, got %s", where, kindOf(m.Get("retries")))
+		}
+		hc.Retries = n
+	}
+	if m.Has("start_interval") {
+		warnings = append(warnings, "healthcheck start_interval is not supported by wslc (ignoring it)")
+	}
+	return hc, warnings, nil
 }
 
 func parseBuild(v any, projectDir string) (*BuildConfig, error) {
@@ -652,11 +708,19 @@ func loadService(project *Project, svcName string, cfgRaw any) (*Service, error)
 		mount.Source = vol.Name
 	}
 
-	deps, depWarnings, err := parseDependsOn(cfg.Get("depends_on"))
+	deps, conditions, depWarnings, err := parseDependsOn(cfg.Get("depends_on"))
 	if err != nil {
 		return nil, err
 	}
-	svc.DependsOn = deps
+	svc.DependsOn, svc.DependsOnConditions = deps, conditions
+	if cfg.Has("healthcheck") {
+		hc, warnings, err := parseHealthcheck(cfg.Get("healthcheck"), field("healthcheck"))
+		if err != nil {
+			return nil, err
+		}
+		svc.Healthcheck = hc
+		depWarnings = append(depWarnings, warnings...)
+	}
 	for _, w := range depWarnings {
 		project.Warnings = append(project.Warnings, svcName+": "+w)
 	}
@@ -726,6 +790,7 @@ var flatPaths = []string{
 	"deploy.resources.limits.memory", "deploy.resources.limits.cpus",
 	"deploy.resources.reservations.devices.*.capabilities[]", "deploy.resources.reservations.devices.*.count",
 	"gpus.*.count",
+	"healthcheck.test[]", "healthcheck.interval", "healthcheck.timeout", "healthcheck.start_period", "healthcheck.retries",
 }
 
 func checkFlatFields(cfg *Mapping, field func(string) string) error {

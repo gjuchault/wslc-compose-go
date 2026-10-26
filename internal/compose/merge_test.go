@@ -1,6 +1,7 @@
 package compose
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -106,8 +107,8 @@ services:
 	if len(web.Volumes) != 2 || web.Volumes[0].Source != filepath.Join(dir, "other") || !web.Volumes[0].ReadOnly {
 		t.Errorf("volumes are unique by target, got %+v", web.Volumes)
 	}
-	if !reflect.DeepEqual(web.DependsOn, []string{"db"}) {
-		t.Errorf("depends_on list and mapping merge, got %q", web.DependsOn)
+	if !reflect.DeepEqual(web.DependsOn, []string{"db"}) || web.DependsOnConditions["db"] != ConditionHealthy {
+		t.Errorf("depends_on list and mapping merge, got %q %v", web.DependsOn, web.DependsOnConditions)
 	}
 	if want := []string{"demo_front", "demo_back"}; !reflect.DeepEqual(web.Networks, want) {
 		t.Errorf("networks = %q, want %q", web.Networks, want)
@@ -194,6 +195,125 @@ func TestSingleFileResetTag(t *testing.T) {
 	project, _ := loadTestProject(t, "services:\n  web:\n    image: x\n    user: !reset root\n")
 	if project.Services["web"].User != "" {
 		t.Errorf("!reset applies within a single file, got %q", project.Services["web"].User)
+	}
+}
+
+func TestHealthcheck(t *testing.T) {
+	project, _ := loadTestProject(t, `
+services:
+  exec:
+    image: x
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/it's"]
+      interval: 5s
+      timeout: 2s
+      start_period: 10s
+      retries: 3
+  shell:
+    image: x
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$USER"]
+  plain:
+    image: x
+    healthcheck:
+      test: redis-cli ping
+  none:
+    image: x
+    healthcheck:
+      test: ["NONE"]
+  disabled:
+    image: x
+    healthcheck:
+      disable: true
+  timings:
+    image: x
+    healthcheck:
+      interval: 1m
+`)
+	cases := map[string]Healthcheck{
+		"exec":     {Test: `curl -f 'http://localhost/it'"'"'s'`, Interval: "5s", Timeout: "2s", StartPeriod: "10s", Retries: 3},
+		"shell":    {Test: "pg_isready -U $USER"},
+		"plain":    {Test: "redis-cli ping"},
+		"none":     {Disable: true},
+		"disabled": {Disable: true},
+		"timings":  {Interval: "1m"},
+	}
+	for name, want := range cases {
+		if got := project.Services[name].Healthcheck; got == nil || *got != want {
+			t.Errorf("%s: healthcheck = %+v, want %+v", name, got, want)
+		}
+	}
+	for _, w := range project.Warnings {
+		if strings.Contains(w, "healthcheck") {
+			t.Errorf("healthcheck is supported, got warning %q", w)
+		}
+	}
+
+	args := strings.Join(RunArgs(project, project.Services["exec"], 1, true, nil), " ")
+	for _, want := range []string{"--health-cmd curl -f", "--health-interval 5s", "--health-timeout 2s", "--health-start-period 10s", "--health-retries 3"} {
+		if !strings.Contains(args, want) {
+			t.Errorf("run args lack %q: %s", want, args)
+		}
+	}
+	if args := RunArgs(project, project.Services["none"], 1, true, nil); !contains(args, "--no-healthcheck") {
+		t.Errorf("a disabled healthcheck passes --no-healthcheck: %q", args)
+	}
+}
+
+func TestHealthcheckErrors(t *testing.T) {
+	for name, hc := range map[string]string{
+		"bad test":    `{test: ["WHAT", "x"]}`,
+		"bad retries": `{test: "true", retries: many}`,
+		"not a map":   `"true"`,
+	} {
+		dir := writeCompose(t, "services:\n  web:\n    image: x\n    healthcheck: "+hc+"\n")
+		if _, err := LoadProject(filepath.Join(dir, "compose.yaml"), "", ""); err == nil {
+			t.Errorf("%s: expected an error", name)
+		}
+	}
+}
+
+// Fields added to Service must not change the config hash of services that
+// do not use them, or every existing container would be recreated.
+func TestNewFieldsKeepConfigHash(t *testing.T) {
+	project, _ := loadTestProject(t, `
+services:
+  web:
+    image: x
+    depends_on:
+      db: {condition: service_healthy}
+  db:
+    image: y
+`)
+	blob, _ := json.Marshal(project.Services["web"])
+	for _, field := range []string{"Healthcheck", "DependsOnConditions"} {
+		if strings.Contains(string(blob), field) {
+			t.Errorf("%s is part of the hashed JSON: %s", field, blob)
+		}
+	}
+}
+
+func TestDependsOnConditions(t *testing.T) {
+	project, _ := loadTestProject(t, `
+services:
+  web:
+    image: x
+    depends_on:
+      db: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+      cache: {condition: service_started}
+      odd: {condition: whatever}
+  db: {image: x}
+  migrate: {image: x}
+  cache: {image: x}
+  odd: {image: x}
+`)
+	want := map[string]string{"db": ConditionHealthy, "migrate": ConditionCompleted}
+	if got := project.Services["web"].DependsOnConditions; !reflect.DeepEqual(got, want) {
+		t.Errorf("conditions = %v, want %v", got, want)
+	}
+	if len(project.Warnings) != 1 || !strings.Contains(project.Warnings[0], "whatever") {
+		t.Errorf("warnings = %q", project.Warnings)
 	}
 }
 

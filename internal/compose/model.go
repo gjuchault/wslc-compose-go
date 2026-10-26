@@ -20,6 +20,22 @@ const (
 	LabelConfigHash = "com.wslc-compose.config-hash"
 )
 
+// Healthcheck is the container health test; wslc runs Test with the shell.
+type Healthcheck struct {
+	Test        string `yaml:"test,omitempty"` // empty: keep the image's test
+	Disable     bool   `yaml:"disable,omitempty"`
+	Interval    string `yaml:"interval,omitempty"`
+	Timeout     string `yaml:"timeout,omitempty"`
+	StartPeriod string `yaml:"start_period,omitempty"`
+	Retries     int    `yaml:"retries,omitempty"`
+}
+
+// depends_on conditions other than service_started, which needs no wait.
+const (
+	ConditionHealthy   = "service_healthy"
+	ConditionCompleted = "service_completed_successfully"
+)
+
 type BuildConfig struct {
 	Context    string            `yaml:"context"`
 	Dockerfile string            `yaml:"dockerfile,omitempty"`
@@ -69,25 +85,31 @@ type Service struct {
 	Networks       []string            `yaml:"networks,omitempty"` // project-resolved network names
 	NetworkAliases map[string][]string `yaml:"network_aliases,omitempty"`
 	DependsOn      []string            `yaml:"depends_on,omitempty"`
-	Hostname       string              `yaml:"hostname,omitempty"`
-	Domainname     string              `yaml:"domainname,omitempty"`
-	DNS            []string            `yaml:"dns,omitempty"`
-	DNSSearch      []string            `yaml:"dns_search,omitempty"`
-	DNSOpt         []string            `yaml:"dns_opt,omitempty"`
-	User           string              `yaml:"user,omitempty"`
-	WorkingDir     string              `yaml:"working_dir,omitempty"`
-	Labels         map[string]string   `yaml:"labels,omitempty"`
-	MemLimit       string              `yaml:"mem_limit,omitempty"`
-	CPUs           string              `yaml:"cpus,omitempty"`
-	ShmSize        string              `yaml:"shm_size,omitempty"`
-	Ulimits        []string            `yaml:"ulimits,omitempty"`
-	StopSignal     string              `yaml:"stop_signal,omitempty"`
-	GPUs           string              `yaml:"gpus,omitempty"`
-	StdinOpen      bool                `yaml:"stdin_open,omitempty"`
-	TTY            bool                `yaml:"tty,omitempty"`
-	Replicas       int                 `yaml:"replicas"`
-	Profiles       []string            `yaml:"profiles,omitempty"`
-	Restart        string              `yaml:"restart,omitempty"` // accepted but not enforceable by wslc yet
+	// DependsOnConditions holds the dependencies to wait for, by condition.
+	// It does not change the container, so it is left out of ConfigHash.
+	DependsOnConditions map[string]string `yaml:"depends_on_conditions,omitempty" json:"-"`
+	// Healthcheck is omitted from ConfigHash when unset, so that the hash
+	// of existing services without one does not change.
+	Healthcheck *Healthcheck      `yaml:"healthcheck,omitempty" json:",omitempty"`
+	Hostname    string            `yaml:"hostname,omitempty"`
+	Domainname  string            `yaml:"domainname,omitempty"`
+	DNS         []string          `yaml:"dns,omitempty"`
+	DNSSearch   []string          `yaml:"dns_search,omitempty"`
+	DNSOpt      []string          `yaml:"dns_opt,omitempty"`
+	User        string            `yaml:"user,omitempty"`
+	WorkingDir  string            `yaml:"working_dir,omitempty"`
+	Labels      map[string]string `yaml:"labels,omitempty"`
+	MemLimit    string            `yaml:"mem_limit,omitempty"`
+	CPUs        string            `yaml:"cpus,omitempty"`
+	ShmSize     string            `yaml:"shm_size,omitempty"`
+	Ulimits     []string          `yaml:"ulimits,omitempty"`
+	StopSignal  string            `yaml:"stop_signal,omitempty"`
+	GPUs        string            `yaml:"gpus,omitempty"`
+	StdinOpen   bool              `yaml:"stdin_open,omitempty"`
+	TTY         bool              `yaml:"tty,omitempty"`
+	Replicas    int               `yaml:"replicas"`
+	Profiles    []string          `yaml:"profiles,omitempty"`
+	Restart     string            `yaml:"restart,omitempty"` // accepted but not enforceable by wslc yet
 }
 
 // ConfigHash fingerprints the service definition to detect config drift.

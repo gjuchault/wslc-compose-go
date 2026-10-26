@@ -145,6 +145,17 @@ func containerArgs(command []string, p *Project, s *Service, name string, labels
 	}
 	opt("--stop-signal", s.StopSignal)
 	opt("--gpus", s.GPUs)
+	if hc := s.Healthcheck; hc != nil && hc.Disable {
+		args = append(args, "--no-healthcheck")
+	} else if hc != nil {
+		opt("--health-cmd", hc.Test)
+		opt("--health-interval", hc.Interval)
+		opt("--health-timeout", hc.Timeout)
+		opt("--health-start-period", hc.StartPeriod)
+		if hc.Retries > 0 {
+			args = append(args, "--health-retries", strconv.Itoa(hc.Retries))
+		}
+	}
 	if s.StdinOpen {
 		args = append(args, "-i")
 	}

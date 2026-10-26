@@ -65,10 +65,10 @@ Légende :
 | Clé | État | Prio |
 |---|---|---|
 | Plusieurs `networks` par service | ✅ `create`, `network connect` (avec alias) pour chaque réseau suivant, puis `start` | — |
-| `healthcheck` + `depends_on.condition: service_healthy` | ❌ 🔒 (un polling de `inspect` côté client est possible si wslc expose l'état de santé) | P1 |
-| `depends_on.condition: service_completed_successfully` | ❌ réalisable côté client en attendant l'exit code via `inspect` | P2 |
+| `healthcheck` + `depends_on.condition: service_healthy` | ✅ flags `--health-*` (wslc 3.0.3) et polling de `inspect` ; la forme exec `CMD` devient une commande shell ; `start_interval` ignoré | — |
+| `depends_on.condition: service_completed_successfully` | ✅ attente de l'exit code via `inspect` | — |
 | `depends_on.required: false`, `restart: true` | ❌ | P3 |
-| `restart` / `deploy.restart_policy` | ❌ 🔒 | P1 |
+| `restart` / `deploy.restart_policy` | ❌ 🔒 vérifié sur wslc 3.0.3 : ni `run` ni `create` n'ont de `--restart`. Avertissement conservé, bloqué côté wslc | P1 |
 | `scale` (clé de service) | ❌ seul `deploy.replicas` est lu | P2 |
 | `expose` | ❌ (ignoré sans avertissement) | P3 |
 | `network_mode` (`host`, `none`, `service:x`) | ❌ ignoré sans avertissement | P2 |
