@@ -12,8 +12,8 @@ Légende :
 
 | Fonctionnalité | État | Prio |
 |---|---|---|
-| Chargement auto de `compose.override.yaml` / `docker-compose.override.yml` | ❌ | P1 |
-| Plusieurs `-f` fusionnés (règles de merge de la spec) et `COMPOSE_FILE` | ❌ un seul fichier | P1 |
+| Chargement auto de `compose.override.yaml` / `docker-compose.override.yml` | ✅ | — |
+| Plusieurs `-f` fusionnés (règles de merge de la spec) et `COMPOSE_FILE` | ✅ `!reset` et `!override` compris ; `COMPOSE_FILE` lu aussi dans le `.env` | — |
 | `--project-directory` | ❌ | P2 |
 | Plusieurs `--env-file` | ❌ un seul | P2 |
 | `env_file` en syntaxe longue (`path`, `required: false`, `format`) | ✅ `path` et `required` ; `format` ignoré | — |

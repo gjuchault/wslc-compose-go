@@ -33,20 +33,72 @@ func timeoutFlag(fs *flagSet) *int {
 // --- project loading -------------------------------------------------------
 
 type globals struct {
-	file        string
+	files       []string
 	projectName string
 	envFile     string
 	dryRun      bool
 	profiles    []string
 }
 
-func locateComposeFile(explicit string) (string, error) {
-	if explicit != "" {
-		if info, err := os.Stat(explicit); err != nil || info.IsDir() {
-			return "", &compose.ComposeError{Msg: "compose file not found: " + explicit}
-		}
-		return explicit, nil
+// composeFiles returns the files to load: the -f options, else COMPOSE_FILE,
+// else the compose file found in this directory or a parent, followed by its
+// override file when there is one.
+func (g *globals) composeFiles() ([]string, error) {
+	files := g.files
+	if len(files) == 0 {
+		files = composeFileVariable(g.envFile)
 	}
+	for _, f := range files {
+		if info, err := os.Stat(f); err != nil || info.IsDir() {
+			return nil, &compose.ComposeError{Msg: "compose file not found: " + f}
+		}
+	}
+	if len(files) > 0 {
+		return files, nil
+	}
+	base, err := locateComposeFile()
+	if err != nil {
+		return nil, err
+	}
+	files = []string{base}
+	if override := compose.FindOverrideFile(filepath.Dir(base)); override != "" {
+		files = append(files, override)
+	}
+	return files, nil
+}
+
+// composeFileVariable reads COMPOSE_FILE from the environment, or from the
+// .env file of the current directory (or --env-file). Its paths are separated
+// by COMPOSE_PATH_SEPARATOR, by default the OS path list separator.
+func composeFileVariable(envFile string) []string {
+	value, ok := os.LookupEnv("COMPOSE_FILE")
+	separator := os.Getenv("COMPOSE_PATH_SEPARATOR")
+	if !ok {
+		if envFile == "" {
+			envFile = ".env"
+		}
+		dotenv, err := compose.LoadDotenv(envFile)
+		if err != nil {
+			return nil
+		}
+		value = dotenv["COMPOSE_FILE"]
+		if separator == "" {
+			separator = dotenv["COMPOSE_PATH_SEPARATOR"]
+		}
+	}
+	if separator == "" {
+		separator = string(os.PathListSeparator)
+	}
+	var files []string
+	for _, f := range strings.Split(value, separator) {
+		if f = strings.TrimSpace(f); f != "" {
+			files = append(files, f)
+		}
+	}
+	return files
+}
+
+func locateComposeFile() (string, error) {
 	directory, err := os.Getwd()
 	if err != nil {
 		return "", err
@@ -65,11 +117,11 @@ func locateComposeFile(explicit string) (string, error) {
 }
 
 func (g *globals) load() (*compose.Project, error) {
-	composeFile, err := locateComposeFile(g.file)
+	files, err := g.composeFiles()
 	if err != nil {
 		return nil, err
 	}
-	project, err := compose.LoadProject(composeFile, g.projectName, g.envFile)
+	project, err := compose.LoadProjectFiles(files, g.projectName, g.envFile)
 	if err != nil {
 		return nil, err
 	}
@@ -900,7 +952,8 @@ func mainUsage() string {
 docker-compose style orchestration for WSL containers (wslc)
 
 options:
-  -f, --file FILE          compose file (default: auto-detect)
+  -f, --file FILE          compose file, repeatable to merge several (default:
+                           COMPOSE_FILE, else auto-detect plus compose.override.yaml)
   -p, --project-name NAME  project name (default: directory name)
       --env-file PATH      alternate .env file
       --dry-run            print wslc commands instead of running them
@@ -921,7 +974,7 @@ func Main(argv []string) int {
 	engine.HandleInterrupts()
 	g := &globals{}
 	fs := newFlagSet("wslc-compose", mainUsage())
-	fs.StringVarP(&g.file, "file", "f", "", "")
+	fs.StringArrayVarP(&g.files, "file", "f", nil, "")
 	fs.StringVarP(&g.projectName, "project-name", "p", "", "")
 	fs.StringVar(&g.envFile, "env-file", "", "")
 	fs.BoolVar(&g.dryRun, "dry-run", false, "")

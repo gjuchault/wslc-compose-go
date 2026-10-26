@@ -48,6 +48,19 @@ func (m *Mapping) set(key string, value any) {
 	m.Values[key] = value
 }
 
+func (m *Mapping) remove(key string) {
+	if _, ok := m.Values[key]; !ok {
+		return
+	}
+	delete(m.Values, key)
+	for i, k := range m.Keys {
+		if k == key {
+			m.Keys = append(m.Keys[:i:i], m.Keys[i+1:]...)
+			break
+		}
+	}
+}
+
 // parseYAML decodes a document into a tree of *Mapping, []any and scalars.
 // Scalars become nil, bool, int, float64 or string; anything else (timestamps,
 // binary, big integers) keeps its source text, like compose does.
@@ -75,6 +88,15 @@ type decoder struct {
 func (d *decoder) fromNode(n *yaml.Node) (any, error) {
 	if d.nodes++; d.nodes > maxNodes {
 		return nil, fmt.Errorf("line %d: document too large (more than %d nodes after alias expansion)", n.Line, maxNodes)
+	}
+	switch n.Tag { // merge tags of the compose spec, resolved by mergeFiles
+	case "!reset":
+		return resetTag{}, nil
+	case "!override":
+		untagged := *n
+		untagged.Tag = ""
+		v, err := d.fromNode(&untagged)
+		return overrideTag{v}, err
 	}
 	switch n.Kind {
 	case yaml.DocumentNode:

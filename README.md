@@ -90,7 +90,7 @@ Add `--dry-run` to any command to print the exact `wslc` invocations instead of 
 ## Commands
 
 ```
-wslc-compose [-f FILE] [-p NAME] [--env-file PATH] [--dry-run] [--profile NAME] COMMAND ...
+wslc-compose [-f FILE]... [-p NAME] [--env-file PATH] [--dry-run] [--profile NAME] COMMAND ...
 
   up        create and start services   (-d, --build, --force-recreate, --scale SVC=N, -t)
   down      stop and remove containers and networks   (-v to remove volumes, -t)
@@ -105,6 +105,12 @@ wslc-compose [-f FILE] [-p NAME] [--env-file PATH] [--dry-run] [--profile NAME] 
 ```
 
 ## Compose support
+
+Files: like Docker Compose, `compose.override.yaml` (or `docker-compose.override.yml`) is
+loaded on top of the auto-detected file; `-f` can be repeated, and `COMPOSE_FILE` (from the
+environment or `.env`) lists files separated by `COMPOSE_PATH_SEPARATOR` (`;` on Windows,
+`:` elsewhere). Files merge with the rules of the Compose Specification, `!reset` and
+`!override` included; relative paths resolve against the first file's directory.
 
 Supported: `image`, `build` (context, dockerfile, args, target, pull), `command`,
 `entrypoint`, `container_name`, `environment`, `env_file`, `ports` (short/long syntax,

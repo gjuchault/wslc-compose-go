@@ -58,8 +58,24 @@ func errorf(format string, args ...any) error {
 	return &ComposeError{fmt.Sprintf(format, args...)}
 }
 
+// OverrideFilenames are loaded on top of an auto-detected compose file.
+var OverrideFilenames = []string{
+	"compose.override.yml",
+	"compose.override.yaml",
+	"docker-compose.override.yml",
+	"docker-compose.override.yaml",
+}
+
 func FindComposeFile(directory string) string {
-	for _, name := range ComposeFilenames {
+	return findFile(directory, ComposeFilenames)
+}
+
+func FindOverrideFile(directory string) string {
+	return findFile(directory, OverrideFilenames)
+}
+
+func findFile(directory string, names []string) string {
+	for _, name := range names {
 		path := filepath.Join(directory, name)
 		if info, err := os.Stat(path); err == nil && !info.IsDir() {
 			return path
@@ -387,10 +403,24 @@ func parseBuild(v any, projectDir string) (*BuildConfig, error) {
 }
 
 func LoadProject(composeFile, projectName, envFile string) (*Project, error) {
-	composeFile, err := filepath.Abs(composeFile)
-	if err != nil {
-		return nil, err
+	return LoadProjectFiles([]string{composeFile}, projectName, envFile)
+}
+
+// LoadProjectFiles loads compose files merged in order. Relative paths in
+// every file resolve against the directory of the first one.
+func LoadProjectFiles(composeFiles []string, projectName, envFile string) (*Project, error) {
+	if len(composeFiles) == 0 {
+		return nil, errorf("no compose file given")
 	}
+	files := make([]string, len(composeFiles))
+	for i, f := range composeFiles {
+		abs, err := filepath.Abs(f)
+		if err != nil {
+			return nil, err
+		}
+		files[i] = abs
+	}
+	composeFile := files[0]
 	projectDir := filepath.Dir(composeFile)
 
 	dotenvPath := envFile
@@ -411,14 +441,28 @@ func LoadProject(composeFile, projectName, envFile string) (*Project, error) {
 		}
 	}
 
-	data, err := os.ReadFile(composeFile)
-	if err != nil {
-		return nil, err
+	var trees []any
+	for i, file := range files {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			return nil, err
+		}
+		tree, err := parseYAML(data)
+		if err != nil {
+			return nil, errorf("%s: %v", file, err)
+		}
+		if _, ok := tree.(*Mapping); !ok {
+			switch {
+			case i == 0:
+				return nil, errorf("%s: no 'services' section found", file)
+			case tree != nil:
+				return nil, errorf("%s: expected a mapping at the top level, got %s", file, kindOf(tree))
+			}
+			continue // an empty override file
+		}
+		trees = append(trees, tree)
 	}
-	tree, err := parseYAML(data)
-	if err != nil {
-		return nil, errorf("%s: %v", composeFile, err)
-	}
+	tree := mergeFiles(trees)
 	if raw, ok := tree.(*Mapping); !ok || !raw.Has("services") {
 		return nil, errorf("%s: no 'services' section found", composeFile)
 	}
