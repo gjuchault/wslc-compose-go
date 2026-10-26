@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -10,13 +11,15 @@ import (
 	"wslc-go/internal/engine"
 )
 
-const upUsage = `usage: wslc-compose up [-d] [--build] [--force-recreate] [--scale SERVICE=N] [-t TIMEOUT] [SERVICE...]
+const upUsage = `usage: wslc-compose up [-d] [--build] [--force-recreate] [--remove-orphans] [--scale SERVICE=N] [-t TIMEOUT] [SERVICE...]
 
 Create and start services.
 
   -d, --detach          run containers in the background
       --build           rebuild images before starting
       --force-recreate  recreate containers even if their config is unchanged
+      --remove-orphans  remove containers of services no longer in the compose file
+                        (also enabled by COMPOSE_REMOVE_ORPHANS=1)
       --scale SERVICE=N scale a service to N containers (repeatable)
   -t, --timeout N       stop timeout in seconds (default 10)
 `
@@ -26,6 +29,7 @@ func cmdUp(g *globals, args []string) (int, error) {
 	detach := fs.BoolP("detach", "d", false, "")
 	build := fs.Bool("build", false, "")
 	forceRecreate := fs.Bool("force-recreate", false, "")
+	removeOrphans := fs.Bool("remove-orphans", false, "")
 	scaleSpecs := fs.StringArray("scale", nil, "")
 	timeout := timeoutFlag(fs)
 	names, err := fs.parse(args)
@@ -66,6 +70,9 @@ func cmdUp(g *globals, args []string) (int, error) {
 	if err != nil {
 		return 1, err
 	}
+	if err := g.handleOrphans(project, containers, *removeOrphans || envFlag("COMPOSE_REMOVE_ORPHANS"), *timeout); err != nil {
+		return 1, err
+	}
 	started, err := g.converge(project, services, containers, convergeOptions{
 		forceRecreate: *forceRecreate,
 		scale:         scale,
@@ -84,6 +91,12 @@ func cmdUp(g *globals, args []string) (int, error) {
 		serviceNames[i] = s.Name
 	}
 	return followLogs(project, serviceNames, logOptions{follow: true, tail: -1})
+}
+
+// envFlag reports whether the environment variable is set to a true value.
+func envFlag(name string) bool {
+	b, err := strconv.ParseBool(os.Getenv(name))
+	return err == nil && b
 }
 
 // ensureResources creates the networks and volumes the services use, and
@@ -169,6 +182,45 @@ func (g *globals) listContainers(project *compose.Project, services []*compose.S
 		selected[i] = svc.Name
 	}
 	return projectContainers(project, true, selected)
+}
+
+// handleOrphans warns about the containers of services that are no longer in
+// the compose file, or removes them. Services disabled by a profile are still
+// in the file, so their containers are not orphans.
+func (g *globals) handleOrphans(project *compose.Project, containers []container, remove bool, timeout int) error {
+	var orphans []container
+	for _, c := range containers {
+		if c.Service != "" && project.Services[c.Service] == nil {
+			orphans = append(orphans, c)
+		}
+	}
+	if len(orphans) == 0 {
+		return nil
+	}
+	if !remove {
+		names := make([]string, len(orphans))
+		for i, c := range orphans {
+			names[i] = c.Name
+		}
+		errorMsg(fmt.Sprintf("warning: found orphan containers (%s) for this project. If you removed or renamed "+
+			"this service in your compose file, you can run this command with the --remove-orphans flag to clean it up.",
+			strings.Join(names, ", ")))
+		return nil
+	}
+	quiet := engine.Opts{Capture: true, DryRun: g.dryRun}
+	for _, c := range orphans {
+		if c.Running {
+			info("Stopping orphan " + c.Name + " ...")
+			if _, err := engine.Run([]string{"stop", "-t", strconv.Itoa(timeout), c.Name}, quiet); err != nil {
+				return err
+			}
+		}
+		info("Removing orphan " + c.Name + " ...")
+		if _, err := engine.Run([]string{"remove", "-f", c.Name}, quiet); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type convergeOptions struct {

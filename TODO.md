@@ -47,11 +47,11 @@ Légende :
 
 | Commande | Manquant | Prio |
 |---|---|---|
-| `up` | `--remove-orphans` (les conteneurs de services supprimés du fichier restent) | P1 |
+| `up` | ✅ `--remove-orphans` (et `COMPOSE_REMOVE_ORPHANS`) | — |
 | `up` | `--no-deps`, `--no-recreate`, `--no-start`, `--no-build`, `--pull always\|missing\|never` | P2 |
 | `up` | `--abort-on-container-exit`, `--exit-code-from`, `--wait`, `--wait-timeout` | P2 |
 | `up` | `--attach` / `--no-attach`, `--timestamps`, `--quiet-pull`, `-V` | P3 |
-| `down` | `--remove-orphans`, `--rmi local\|all`, services en argument | P2 |
+| `down` | `--rmi local\|all`, services en argument (`--remove-orphans` est accepté : `down` supprime déjà tous les conteneurs du projet) | P2 |
 | `ps` | `-a` (les conteneurs arrêtés sont déjà listés : à aligner), `--services`, `--format json`, `--status`, `--filter` | P2 |
 | `logs` | `--since`, `--until`, `--no-log-prefix`, `--no-color`, `--index`, couleurs par service | P2 |
 | `exec` | `-d/--detach`, `--privileged` 🔒 | P3 |
@@ -94,7 +94,7 @@ Légende :
 |---|---|---|
 | `networks.<x>.driver`, `driver_opts`, `ipam`, `internal`, `attachable`, `labels`, `enable_ipv6` | ❌ ignorés sans avertissement | P2 |
 | `volumes.<x>.driver`, `driver_opts`, `labels` | ❌ ignorés sans avertissement | P2 |
-| Labels de projet sur les réseaux et volumes (pour `down` et `ls` fiables) | ❌ basé sur le nom uniquement | P2 |
+| Labels de projet sur les réseaux et volumes (pour `down` et `ls` fiables) | ❌ basé sur le nom uniquement : le réseau d'un service supprimé du fichier reste après `down` | P2 |
 | `external: {name: x}` (ancienne syntaxe) | ⚠️ `external` est vrai mais le nom imbriqué est ignoré | P3 |
 | `down` qui supprime aussi le réseau `default` créé implicitement | ✅ à vérifier par un test | — |
 
@@ -105,7 +105,7 @@ Légende :
 | Démarrage parallèle des services indépendants (respect du DAG `depends_on`) | ❌ séquentiel | P2 |
 | Arrêt en ordre inverse des dépendances dans `down` / `stop` | ❌ ordre de listing wslc | P2 |
 | Recréation des dépendants quand une dépendance est recréée | ❌ | P3 |
-| Détection et suppression des conteneurs orphelins | ❌ | P1 |
+| Détection et suppression des conteneurs orphelins | ✅ avertissement par défaut, suppression avec `--remove-orphans` | — |
 | Recréation quand l'image locale change (digest) et pas seulement la config | ❌ | P2 |
 | Prise en compte du contenu des `env_file` dans le hash de config | ❌ seul le chemin est hashé | P2 |
 | Logs colorés par service, préfixe `service-1 \|` | ⚠️ préfixe = nom complet du conteneur, sans couleur | P3 |

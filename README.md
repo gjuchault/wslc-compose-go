@@ -92,7 +92,8 @@ Add `--dry-run` to any command to print the exact `wslc` invocations instead of 
 ```
 wslc-compose [-f FILE]... [-p NAME] [--env-file PATH] [--dry-run] [--profile NAME] COMMAND ...
 
-  up        create and start services   (-d, --build, --force-recreate, --scale SVC=N, -t)
+  up        create and start services   (-d, --build, --force-recreate, --remove-orphans,
+                                         --scale SVC=N, -t)
   down      stop and remove containers and networks   (-v to remove volumes, -t)
   ps        list project containers     (-q)
   logs      show container logs         (-f, -n TAIL, -t)
@@ -129,6 +130,9 @@ Accepted with a warning (wslc cannot enforce them): `restart`, `cap_add`,
 `cap_drop`, `privileged`, `devices`, `extra_hosts`, `sysctls`, `secrets`, `configs`,
 `init`, `pid`, `ipc`, `read_only`, `security_opt`, `logging`, healthcheck
 `start_interval`, and unknown `depends_on` conditions.
+
+`up` warns about containers of services removed from the compose file and removes them
+with `--remove-orphans` (or `COMPOSE_REMOVE_ORPHANS=1`); `down` always removes them.
 
 Interpolation: `$VAR`, `${VAR}`, `${VAR:-default}`, `${VAR-default}`, `${VAR:+alt}`,
 `${VAR+alt}`, `${VAR:?error}`, `${VAR?error}`, `$$` — from `.env` (or `--env-file`), with

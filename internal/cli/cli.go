@@ -385,17 +385,20 @@ func warnUnlessInterrupted(err error, message string) error {
 
 // --- commands ----------------------------------------------------------------
 
-const downUsage = `usage: wslc-compose down [-v] [-t TIMEOUT]
+const downUsage = `usage: wslc-compose down [-v] [--remove-orphans] [-t TIMEOUT]
 
-Stop and remove project containers and networks.
+Stop and remove project containers (orphans included)
+and networks.
 
-  -v, --volumes    also remove named volumes
-  -t, --timeout N  stop timeout in seconds (default 10)
+  -v, --volumes         also remove named volumes
+      --remove-orphans  accepted for compatibility: down always removes them
+  -t, --timeout N       stop timeout in seconds (default 10)
 `
 
 func cmdDown(g *globals, args []string) (int, error) {
 	fs := newFlagSet("down", downUsage)
 	volumes := fs.BoolP("volumes", "v", false, "")
+	fs.Bool("remove-orphans", false, "")
 	timeout := timeoutFlag(fs)
 	if err := fs.parseNoArgs(args); err != nil {
 		return 0, err

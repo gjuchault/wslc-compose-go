@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -10,6 +11,16 @@ import (
 
 	"wslc-go/internal/compose"
 )
+
+// inspectJSON renders wslc inspect output for a container of the demo project.
+func inspectJSON(name, service string, extra map[string]string, state map[string]any) string {
+	labels := map[string]string{compose.LabelProject: "demo", compose.LabelService: service}
+	for k, v := range extra {
+		labels[k] = v
+	}
+	data, _ := json.Marshal([]any{map[string]any{"Name": "/" + name, "Labels": labels, "State": state}})
+	return string(data)
+}
 
 // callWith reports whether a call contains every part.
 func callWith(calls []string, parts ...string) bool {
@@ -23,6 +34,57 @@ func callWith(calls []string, parts ...string) bool {
 		}
 	}
 	return false
+}
+
+// The list in wslc 3's format: one object per line, docker's keys.
+const orphanListed = `{"ID":"abc","Names":"demo-web-1","Image":"nginx","Ports":""}
+{"ID":"def","Names":"demo-old-1","Image":"nginx","Ports":""}
+`
+
+func orphanRules(t *testing.T, path string) []rule {
+	running := map[string]any{"Running": true, "Status": "running"}
+	return []rule{
+		{Prefix: "list", Stdout: orphanListed},
+		{Prefix: "inspect abc", Stdout: webInspect(t, path, true)},
+		{Prefix: "inspect def", Stdout: inspectJSON("demo-old-1", "old", nil, running)},
+		{Prefix: "network list", Stdout: `{"Name":"demo_default"}` + "\n"},
+	}
+}
+
+func TestUpWarnsAboutOrphans(t *testing.T) {
+	path := writeProject(t, webProject)
+	t.Setenv("COMPOSE_REMOVE_ORPHANS", "")
+	calls := useFake(t, orphanRules(t, path)...)
+	if code := Main([]string{"-f", path, "up", "-d"}); code != 0 {
+		t.Errorf("exit code = %d", code)
+	}
+	if got := calls(); anyCall(got, "remove") || anyCall(got, "stop") || anyCall(got, "run") || anyCall(got, "network create") {
+		t.Errorf("up without --remove-orphans changed something: %q", got)
+	}
+}
+
+func TestUpRemovesOrphans(t *testing.T) {
+	path := writeProject(t, webProject)
+	for _, viaEnv := range []bool{false, true} {
+		args := []string{"-f", path, "up", "-d"}
+		if viaEnv {
+			t.Setenv("COMPOSE_REMOVE_ORPHANS", "1")
+		} else {
+			t.Setenv("COMPOSE_REMOVE_ORPHANS", "")
+			args = append(args, "--remove-orphans")
+		}
+		calls := useFake(t, orphanRules(t, path)...)
+		if code := Main(args); code != 0 {
+			t.Errorf("exit code = %d", code)
+		}
+		got := calls()
+		if !anyCall(got, "stop -t 10 demo-old-1") || !anyCall(got, "remove -f demo-old-1") {
+			t.Errorf("viaEnv=%v: orphan not removed: %q", viaEnv, got)
+		}
+		if anyCall(got, "remove -f demo-web") {
+			t.Errorf("viaEnv=%v: service container removed: %q", viaEnv, got)
+		}
+	}
 }
 
 const multiNetworkProject = `
