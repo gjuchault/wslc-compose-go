@@ -8,7 +8,7 @@
   irm https://raw.githubusercontent.com/gjuchault/wslc-compose-go/main/install.ps1 | iex
 
 .EXAMPLE
-  & ([scriptblock]::Create((irm https://raw.githubusercontent.com/gjuchault/wslc-compose-go/main/install.ps1))) -Version v0.2.1
+  & ([scriptblock]::Create((irm https://raw.githubusercontent.com/gjuchault/wslc-compose-go/main/install.ps1))) -Version v0.3.0
 #>
 param(
     [string]$Version = 'latest',

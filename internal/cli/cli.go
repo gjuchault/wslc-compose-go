@@ -18,7 +18,7 @@ import (
 )
 
 // Version is overridable at build time with -ldflags "-X wslc-go/internal/cli.Version=...".
-var Version = "0.2.1"
+var Version = "0.3.0"
 
 var protocols = map[string]string{"6": "tcp", "17": "udp"}
 

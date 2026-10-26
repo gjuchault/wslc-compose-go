@@ -38,7 +38,7 @@ Options (pass them through a script block):
 
 ```powershell
 $install = [scriptblock]::Create((irm https://raw.githubusercontent.com/gjuchault/wslc-compose-go/main/install.ps1))
-& $install -Version v0.2.1   # pin a release
+& $install -Version v0.3.0   # pin a release
 & $install -NoAlias          # only install wslc-compose on PATH
 & $install -Uninstall        # remove binaries, PATH entry and alias
 ```
