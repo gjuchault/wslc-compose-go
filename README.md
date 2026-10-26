@@ -94,6 +94,8 @@ wslc-compose [-f FILE]... [-p NAME] [--env-file PATH] [--dry-run] [--profile NAM
 
   up        create and start services   (-d, --build, --force-recreate, --remove-orphans,
                                          --scale SVC=N, -t)
+  run       run a one-off command in a new service container
+            (-d, --rm, --name, --no-deps, --build, -e, -l, -v, -p, -P, --entrypoint, -u, -w, -T)
   down      stop and remove containers and networks   (-v to remove volumes, -t)
   ps        list project containers     (-q)
   logs      show container logs         (-f, -n TAIL, -t)
@@ -146,6 +148,7 @@ raw `wslc` CLI can be mixed freely:
 
 ```
 com.wslc-compose.project / .service / .container-number / .config-hash
+com.wslc-compose.oneoff=True        (containers of `run`, named <project>-<service>-run-<id>)
 ```
 
 `up` compares the config hash label with the current definition: unchanged running

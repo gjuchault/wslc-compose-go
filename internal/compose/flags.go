@@ -25,6 +25,15 @@ func CreateArgs(p *Project, s *Service, index int, mapper PathMapper) []string {
 	return containerArgs([]string{"create"}, p, s, p.ContainerName(s, index), replicaLabels(p, s, index), true, mapper)
 }
 
+// OneOffArgs builds the arguments for a one-off container of a service
+// (`wslc-compose run`), command being "run [flags...]" or "create [flags...]".
+// It carries the one-off label instead of the replica labels, and no network
+// alias, so that it does not receive the service's traffic.
+func OneOffArgs(command []string, p *Project, s *Service, name string, mapper PathMapper) []string {
+	labels := []string{LabelProject + "=" + p.Name, LabelService + "=" + s.Name, LabelOneOff + "=True"}
+	return containerArgs(command, p, s, name, labels, false, mapper)
+}
+
 // ConnectArgs builds the `wslc network connect` commands attaching a
 // container to the networks of s after the first one, which wslc run and
 // create take.

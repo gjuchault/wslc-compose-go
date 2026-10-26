@@ -1,6 +1,9 @@
 package cli
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -190,7 +193,7 @@ func (g *globals) listContainers(project *compose.Project, services []*compose.S
 func (g *globals) handleOrphans(project *compose.Project, containers []container, remove bool, timeout int) error {
 	var orphans []container
 	for _, c := range containers {
-		if c.Service != "" && project.Services[c.Service] == nil {
+		if !c.OneOff && c.Service != "" && project.Services[c.Service] == nil {
 			orphans = append(orphans, c)
 		}
 	}
@@ -241,7 +244,9 @@ func (o convergeOptions) replicas(svc *compose.Service) int {
 func (g *globals) converge(project *compose.Project, services []*compose.Service, containers []container, o convergeOptions) ([]string, error) {
 	existing := map[string]container{}
 	for _, c := range containers {
-		existing[c.Name] = c
+		if !c.OneOff {
+			existing[c.Name] = c
+		}
 	}
 	quiet := engine.Opts{Capture: true, DryRun: g.dryRun}
 	var started []string
@@ -448,4 +453,207 @@ func conditionMet(name, condition string, data map[string]any) (bool, error) {
 		return false, nil
 	}
 	return true, nil
+}
+
+const runUsage = `usage: wslc-compose run [-d] [--rm] [--name NAME] [--no-deps] [--build] [-e KEY=VAL] [-l KEY=VAL]
+                        [-v VOLUME] [-p PORT] [-P] [--entrypoint CMD] [-u USER] [-w DIR] [-T]
+                        SERVICE [COMMAND [ARG...]]
+
+Run a one-off command in a new container of a service. The services it
+depends on are started first; its ports are not published unless -P is given.
+
+  -d, --detach          run the container in the background and print its name
+      --rm              remove the container when it exits
+      --name NAME       container name (default: PROJECT-SERVICE-run-ID)
+      --no-deps         do not start the services it depends on
+      --build           build the image before starting the container
+  -e, --env KEY=VAL     set an environment variable (repeatable)
+  -l, --label KEY=VAL   add a label (repeatable)
+  -v, --volume VOLUME   mount a volume or a host path (repeatable)
+  -p, --publish PORT    publish a container port (repeatable)
+  -P, --service-ports   publish the ports of the service
+      --entrypoint CMD  override the entrypoint of the image
+  -u, --user USER       run as this user
+  -w, --workdir DIR     working directory inside the container
+  -T, --no-tty          disable pseudo-TTY allocation
+`
+
+func cmdRun(g *globals, args []string) (int, error) {
+	fs := newFlagSet("run", runUsage)
+	detach := fs.BoolP("detach", "d", false, "")
+	rm := fs.Bool("rm", false, "")
+	name := fs.String("name", "", "")
+	noDeps := fs.Bool("no-deps", false, "")
+	build := fs.Bool("build", false, "")
+	env := fs.StringArrayP("env", "e", nil, "")
+	labels := fs.StringArrayP("label", "l", nil, "")
+	volumes := fs.StringArrayP("volume", "v", nil, "")
+	publish := fs.StringArrayP("publish", "p", nil, "")
+	servicePorts := fs.BoolP("service-ports", "P", false, "")
+	entrypoint := fs.String("entrypoint", "", "")
+	user := fs.StringP("user", "u", "", "")
+	workdir := fs.StringP("workdir", "w", "", "")
+	noTTY := fs.BoolP("no-tty", "T", false, "")
+	fs.stopAtFirstArg() // everything after the service name is the command
+	positional, err := fs.parse(args)
+	if err != nil {
+		return 0, err
+	}
+	if len(positional) == 0 {
+		return 0, fs.fail(errors.New("the following arguments are required: SERVICE"))
+	}
+	serviceName, command := positional[0], positional[1:]
+
+	project, err := g.load()
+	if err != nil {
+		return 1, err
+	}
+	svc, ok := project.Services[serviceName]
+	if !ok {
+		return 1, &compose.ComposeError{Msg: "no such service: " + serviceName}
+	}
+
+	one := *svc // the one-off container's service, with the overrides
+	if len(command) > 0 {
+		one.Command = command
+	}
+	if fs.Changed("entrypoint") {
+		if one.Entrypoint, err = compose.ParseCommand(*entrypoint); err != nil {
+			return 1, &compose.ComposeError{Msg: fmt.Sprintf("--entrypoint: %v", err)}
+		}
+	}
+	if !*servicePorts {
+		one.Ports = nil
+	}
+	one.Ports = append([]compose.PortMapping(nil), one.Ports...)
+	for _, spec := range *publish {
+		mappings, err := compose.ParsePort(spec)
+		if err != nil {
+			return 1, err
+		}
+		one.Ports = append(one.Ports, mappings...)
+	}
+	one.Environment = map[string]*string{}
+	for k, v := range svc.Environment {
+		one.Environment[k] = v
+	}
+	for _, e := range *env {
+		key, value, found := strings.Cut(e, "=")
+		if found {
+			one.Environment[key] = &value
+		} else {
+			one.Environment[key] = nil
+		}
+	}
+	one.Labels = map[string]string{}
+	for k, v := range svc.Labels {
+		one.Labels[k] = v
+	}
+	for _, l := range *labels {
+		key, value, _ := strings.Cut(l, "=")
+		one.Labels[key] = value
+	}
+	one.Volumes = append([]*compose.VolumeMount(nil), svc.Volumes...)
+	for _, spec := range *volumes {
+		mount, err := compose.ParseVolume(spec, project.Directory)
+		if err != nil {
+			return 1, err
+		}
+		if vol, ok := project.Volumes[mount.Source]; ok && mount.Type == "volume" {
+			mount.Source = vol.Name
+		}
+		one.Volumes = append(one.Volumes, mount)
+	}
+	if *user != "" {
+		one.User = *user
+	}
+	if *workdir != "" {
+		one.WorkingDir = *workdir
+	}
+	if *detach {
+		one.TTY = one.TTY && !*noTTY
+	} else {
+		one.StdinOpen = true
+		one.TTY = !*noTTY && isTerminal(os.Stdin)
+	}
+	containerName := *name
+	if containerName == "" {
+		suffix := make([]byte, 6)
+		rand.Read(suffix)
+		containerName = fmt.Sprintf("%s-%s-run-%s", project.Name, svc.Name, hex.EncodeToString(suffix))
+	}
+
+	var deps []*compose.Service
+	if !*noDeps {
+		selected, err := selectServices(project, []string{svc.Name}, g.profiles)
+		if err != nil {
+			return 1, err
+		}
+		for _, s := range selected {
+			if s.Name != svc.Name {
+				deps = append(deps, s)
+			}
+		}
+	}
+	if err := g.ensureResources(project, append(deps, &one)); err != nil {
+		return 1, err
+	}
+	if err := g.buildImages(project, deps, false); err != nil {
+		return 1, err
+	}
+	if err := g.buildImages(project, []*compose.Service{&one}, *build); err != nil {
+		return 1, err
+	}
+	if len(deps) > 0 {
+		containers, err := g.listContainers(project, deps)
+		if err != nil {
+			return 1, err
+		}
+		if _, err := g.converge(project, deps, containers, convergeOptions{timeout: 10}); err != nil {
+			return 1, err
+		}
+		if err := waitForDependencies(project, &one, convergeOptions{}.replicas, g.dryRun); err != nil {
+			return 1, err
+		}
+	}
+
+	if len(one.Networks) <= 1 {
+		runCmd := []string{"run"}
+		if *detach {
+			runCmd = append(runCmd, "-d")
+		}
+		if *rm {
+			runCmd = append(runCmd, "--rm")
+		}
+		runArgs := compose.OneOffArgs(runCmd, project, &one, containerName, engine.ToHostPath)
+		if !*detach {
+			return engine.RunInteractive(runArgs, g.dryRun)
+		}
+		if _, err := engine.Run(runArgs, engine.Opts{Capture: true, DryRun: g.dryRun}); err != nil {
+			return 1, err
+		}
+		info(containerName)
+		return 0, nil
+	}
+
+	createCmd := []string{"create"}
+	if *rm {
+		createCmd = append(createCmd, "--rm")
+	}
+	createArgs := compose.OneOffArgs(createCmd, project, &one, containerName, engine.ToHostPath)
+	if err := g.createConnected(createArgs, &one, containerName, false); err != nil {
+		return 1, err
+	}
+	if *detach {
+		if _, err := engine.RunRetried([]string{"start", containerName}, g.dryRun); err != nil {
+			return 1, err
+		}
+		info(containerName)
+		return 0, nil
+	}
+	startArgs := []string{"start", "-a"}
+	if one.StdinOpen {
+		startArgs = append(startArgs, "-i")
+	}
+	return engine.RunInteractive(append(startArgs, containerName), g.dryRun)
 }

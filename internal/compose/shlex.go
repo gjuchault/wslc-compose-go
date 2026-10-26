@@ -65,6 +65,9 @@ func shlexSplit(s string) ([]string, error) {
 	return words, nil
 }
 
+// ParseCommand splits a command line given as one string (run --entrypoint).
+func ParseCommand(s string) ([]string, error) { return shlexSplit(s) }
+
 // shellJoin quotes words into a POSIX shell command line, like shlex.join.
 func shellJoin(words []string) string {
 	quoted := make([]string, len(words))

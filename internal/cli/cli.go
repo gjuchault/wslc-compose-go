@@ -213,7 +213,8 @@ type container struct {
 	Hash    string
 	Running bool
 	Status  string
-	Ports   any // a list of port objects, or the text wslc 3 prints
+	Ports   any  // a list of port objects, or the text wslc 3 prints
+	OneOff  bool // created by `run`
 }
 
 // str renders a JSON scalar as a string ("" for null).
@@ -289,6 +290,7 @@ func projectContainers(project *compose.Project, strict bool, services []string)
 			Running: running,
 			Status:  status,
 			Ports:   ports,
+			OneOff:  str(labels[compose.LabelOneOff]) == "True",
 		})
 	}
 	return result, nil
@@ -387,7 +389,7 @@ func warnUnlessInterrupted(err error, message string) error {
 
 const downUsage = `usage: wslc-compose down [-v] [--remove-orphans] [-t TIMEOUT]
 
-Stop and remove project containers (orphans included)
+Stop and remove project containers (orphans and one-off containers included)
 and networks.
 
   -v, --volumes         also remove named volumes
@@ -740,6 +742,7 @@ type command struct {
 
 var commands = []command{
 	{"up", "create and start services", cmdUp},
+	{"run", "run a one-off command in a new service container", cmdRun},
 	{"down", "stop and remove project containers and networks", cmdDown},
 	{"ps", "list project containers", cmdPs},
 	{"logs", "show container logs", cmdLogs},

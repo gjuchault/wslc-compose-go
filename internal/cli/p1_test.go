@@ -39,6 +39,7 @@ func callWith(calls []string, parts ...string) bool {
 // The list in wslc 3's format: one object per line, docker's keys.
 const orphanListed = `{"ID":"abc","Names":"demo-web-1","Image":"nginx","Ports":""}
 {"ID":"def","Names":"demo-old-1","Image":"nginx","Ports":""}
+{"ID":"ghi","Names":"demo-web-run-1","Image":"nginx","Ports":""}
 `
 
 func orphanRules(t *testing.T, path string) []rule {
@@ -47,6 +48,7 @@ func orphanRules(t *testing.T, path string) []rule {
 		{Prefix: "list", Stdout: orphanListed},
 		{Prefix: "inspect abc", Stdout: webInspect(t, path, true)},
 		{Prefix: "inspect def", Stdout: inspectJSON("demo-old-1", "old", nil, running)},
+		{Prefix: "inspect ghi", Stdout: inspectJSON("demo-web-run-1", "web", map[string]string{compose.LabelOneOff: "True"}, running)},
 		{Prefix: "network list", Stdout: `{"Name":"demo_default"}` + "\n"},
 	}
 }
@@ -82,7 +84,7 @@ func TestUpRemovesOrphans(t *testing.T) {
 			t.Errorf("viaEnv=%v: orphan not removed: %q", viaEnv, got)
 		}
 		if anyCall(got, "remove -f demo-web") {
-			t.Errorf("viaEnv=%v: service container removed: %q", viaEnv, got)
+			t.Errorf("viaEnv=%v: service or one-off container removed: %q", viaEnv, got)
 		}
 	}
 }
@@ -141,6 +143,62 @@ func TestUpRemovesContainerWhenConnectFails(t *testing.T) {
 	}
 	if got := calls(); !anyCall(got, "remove -f demo-web-1") || anyCall(got, "start") {
 		t.Errorf("a half-connected container must be removed, not started: %q", got)
+	}
+}
+
+const runProject = `
+name: demo
+services:
+  web:
+    image: nginx
+    command: nginx
+    ports: ["8080:80"]
+    environment: {A: "1"}
+    depends_on:
+      db: {condition: service_healthy}
+  db:
+    image: postgres
+`
+
+func TestRunOneOffContainer(t *testing.T) {
+	path := writeProject(t, runProject)
+	calls := useFake(t, rule{Prefix: "network list", Stdout: `{"Name":"demo_default"}` + "\n"})
+	code := Main([]string{"-f", path, "run", "--rm", "-T", "--no-deps", "-e", "B=2", "-p", "9000:9000", "web", "echo", "hi"})
+	if code != 0 {
+		t.Errorf("exit code = %d", code)
+	}
+	got := calls()
+	if anyCall(got, "list") || anyCall(got, "inspect") {
+		t.Errorf("--no-deps looked at the dependencies: %q", got)
+	}
+	if !callWith(got, "run --rm --name demo-web-run-", "-l "+compose.LabelOneOff+"=True", "-e A=1", "-e B=2", "-p 9000:9000", " -i ", "nginx echo hi") {
+		t.Errorf("run call = %q", got)
+	}
+	if callWith(got, "run", "8080:80") || callWith(got, "run", "--network-alias") || callWith(got, "run", " -t ") {
+		t.Errorf("service ports, aliases or a TTY leaked into the one-off container: %q", got)
+	}
+}
+
+func TestRunStartsDependenciesAndWaits(t *testing.T) {
+	path := writeProject(t, runProject)
+	healthy := inspectJSON("demo-db-1", "db", nil, map[string]any{"Running": true, "Status": "running", "Health": map[string]any{"Status": "healthy"}})
+	calls := useFake(t,
+		rule{Prefix: "list"},
+		rule{Prefix: "inspect demo-db-1", Stdout: healthy},
+		rule{Prefix: "network list", Stdout: `{"Name":"demo_default"}` + "\n"},
+	)
+	if code := Main([]string{"-f", path, "run", "-d", "--name", "job", "-P", "web"}); code != 0 {
+		t.Errorf("exit code = %d", code)
+	}
+	got := calls()
+	if !callWith(got, "run -d --name demo-db-1") || !anyCall(got, "inspect demo-db-1") {
+		t.Errorf("dependency not started or not waited for: %q", got)
+	}
+	if !callWith(got, "run -d --name job", "-p 8080:80", "nginx nginx") {
+		t.Errorf("one-off call = %q", got)
+	}
+	if callWith(got, "run", "--name demo-web-1") {
+		t.Errorf("run started the service itself: %q", got)
 	}
 }
 

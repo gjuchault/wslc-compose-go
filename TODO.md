@@ -30,7 +30,7 @@ Légende :
 
 | Commande | État | Prio |
 |---|---|---|
-| `run` (conteneur ponctuel, `--rm`, `--no-deps`, `-e`, `--entrypoint`, `-p/--service-ports`) | ❌ | P1 |
+| `run` (conteneur ponctuel, `--rm`, `--no-deps`, `-e`, `--entrypoint`, `-p/--service-ports`) | ✅ plus `-d`, `--name`, `--build`, `-l`, `-v`, `-u`, `-w`, `-T` ; manquent `--use-aliases`, `--pull` | — |
 | `rm` (conteneurs arrêtés) | ❌ | P2 |
 | `kill` (`-s SIGNAL`) | ❌ | P2 |
 | `create` | ❌ | P3 |
@@ -105,7 +105,7 @@ Légende :
 | Démarrage parallèle des services indépendants (respect du DAG `depends_on`) | ❌ séquentiel | P2 |
 | Arrêt en ordre inverse des dépendances dans `down` / `stop` | ❌ ordre de listing wslc | P2 |
 | Recréation des dépendants quand une dépendance est recréée | ❌ | P3 |
-| Détection et suppression des conteneurs orphelins | ✅ avertissement par défaut, suppression avec `--remove-orphans` | — |
+| Détection et suppression des conteneurs orphelins | ✅ avertissement par défaut, suppression avec `--remove-orphans` ; les conteneurs de `run` (label `oneoff`) sont exclus | — |
 | Recréation quand l'image locale change (digest) et pas seulement la config | ❌ | P2 |
 | Prise en compte du contenu des `env_file` dans le hash de config | ❌ seul le chemin est hashé | P2 |
 | Logs colorés par service, préfixe `service-1 \|` | ⚠️ préfixe = nom complet du conteneur, sans couleur | P3 |

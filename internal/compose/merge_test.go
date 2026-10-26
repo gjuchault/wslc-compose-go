@@ -342,6 +342,11 @@ networks:
 	if got := ConnectArgs(web, "x", false); contains(got[0], "--network-alias") {
 		t.Errorf("connect without aliases = %q", got)
 	}
+
+	oneOff := OneOffArgs([]string{"run", "--rm"}, project, web, "demo-web-run-1", nil)
+	if contains(oneOff, "--network-alias") || !contains(oneOff, LabelOneOff+"=True") || contains(oneOff, LabelIndex+"=1") {
+		t.Errorf("one-off args = %q", oneOff)
+	}
 }
 
 func contains(list []string, s string) bool {

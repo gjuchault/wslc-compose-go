@@ -18,6 +18,7 @@ const (
 	LabelService    = "com.wslc-compose.service"
 	LabelIndex      = "com.wslc-compose.container-number"
 	LabelConfigHash = "com.wslc-compose.config-hash"
+	LabelOneOff     = "com.wslc-compose.oneoff" // "True" on containers created by `run`
 )
 
 // Healthcheck is the container health test; wslc runs Test with the shell.
