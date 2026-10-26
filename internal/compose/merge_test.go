@@ -196,3 +196,39 @@ func TestSingleFileResetTag(t *testing.T) {
 		t.Errorf("!reset applies within a single file, got %q", project.Services["web"].User)
 	}
 }
+
+func TestMultiNetworkArgs(t *testing.T) {
+	project, _ := loadTestProject(t, `
+name: demo
+services:
+  web:
+    image: x
+    networks:
+      front: {aliases: [www]}
+      back: {aliases: [api]}
+networks:
+  front:
+  back:
+`)
+	web := project.Services["web"]
+	create := CreateArgs(project, web, 1, nil)
+	if create[0] != "create" || contains(create, "-d") || after(t, create, "--network") != "demo_front" {
+		t.Errorf("create args = %q", create)
+	}
+	want := [][]string{{"network", "connect", "--network-alias", "api", "--network-alias", "web", "demo_back", "demo-web-1"}}
+	if got := ConnectArgs(web, "demo-web-1", true); !reflect.DeepEqual(got, want) {
+		t.Errorf("connect args = %q, want %q", got, want)
+	}
+	if got := ConnectArgs(web, "x", false); contains(got[0], "--network-alias") {
+		t.Errorf("connect without aliases = %q", got)
+	}
+}
+
+func contains(list []string, s string) bool {
+	for _, item := range list {
+		if item == s {
+			return true
+		}
+	}
+	return false
+}

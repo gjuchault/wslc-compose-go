@@ -115,10 +115,12 @@ environment or `.env`) lists files separated by `COMPOSE_PATH_SEPARATOR` (`;` on
 Supported: `image`, `build` (context, dockerfile, args, target, pull), `command`,
 `entrypoint`, `container_name`, `environment`, `env_file`, `ports` (short/long syntax,
 ranges, `ip:host:container`, `/udp`), `volumes` (bind, named, tmpfs, Windows paths like
-`E:\data:/srv:ro`), `tmpfs`, `networks` (with `aliases`, external), `depends_on`,
-`hostname`, `domainname`, `dns*`, `user`, `working_dir`, `labels`, `mem_limit`, `cpus`,
-`shm_size`, `ulimits`, `stop_signal`, `gpus`, `stdin_open`, `tty`, `profiles`,
-`deploy.replicas`, `deploy.resources.limits`, GPU device reservations.
+`E:\data:/srv:ro`), `tmpfs`, `networks` (several per service, with `aliases`, external),
+`depends_on`, `hostname`, `domainname`, `dns*`, `user`, `working_dir`, `labels`,
+`mem_limit`, `cpus`, `shm_size`, `ulimits`, `stop_signal`, `gpus`, `stdin_open`, `tty`,
+`profiles`, `deploy.replicas`, `deploy.resources.limits`, GPU device reservations.
+
+A service on several networks is created, connected to each one, then started.
 
 Accepted with a warning (wslc cannot enforce them): `healthcheck`, `restart`, `cap_add`,
 `cap_drop`, `privileged`, `devices`, `extra_hosts`, `sysctls`, `secrets`, `configs`,

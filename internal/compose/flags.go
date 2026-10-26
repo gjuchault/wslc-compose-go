@@ -12,19 +12,64 @@ func identity(p string) string { return p }
 
 // RunArgs builds the arguments for `wslc run` creating one container of a service.
 func RunArgs(p *Project, s *Service, index int, detach bool, mapper PathMapper) []string {
+	command := []string{"run"}
+	if detach {
+		command = append(command, "-d")
+	}
+	return containerArgs(command, p, s, p.ContainerName(s, index), replicaLabels(p, s, index), true, mapper)
+}
+
+// CreateArgs builds the arguments for `wslc create`, for a container that is
+// connected to more networks (ConnectArgs) before it starts.
+func CreateArgs(p *Project, s *Service, index int, mapper PathMapper) []string {
+	return containerArgs([]string{"create"}, p, s, p.ContainerName(s, index), replicaLabels(p, s, index), true, mapper)
+}
+
+// ConnectArgs builds the `wslc network connect` commands attaching a
+// container to the networks of s after the first one, which wslc run and
+// create take.
+func ConnectArgs(s *Service, name string, aliases bool) [][]string {
+	var commands [][]string
+	for i := 1; i < len(s.Networks); i++ {
+		network := s.Networks[i]
+		args := []string{"network", "connect"}
+		if aliases {
+			for _, alias := range networkAliases(s, network) {
+				args = append(args, "--network-alias", alias)
+			}
+		}
+		commands = append(commands, append(args, network, name))
+	}
+	return commands
+}
+
+func replicaLabels(p *Project, s *Service, index int) []string {
+	return []string{
+		LabelProject + "=" + p.Name,
+		LabelService + "=" + s.Name,
+		LabelIndex + "=" + strconv.Itoa(index),
+		LabelConfigHash + "=" + s.ConfigHash(),
+	}
+}
+
+// networkAliases returns the service name and the aliases set for network.
+func networkAliases(s *Service, network string) []string {
+	aliases := map[string]bool{s.Name: true}
+	for _, alias := range s.NetworkAliases[network] {
+		aliases[alias] = true
+	}
+	return sortedKeys(aliases)
+}
+
+func containerArgs(command []string, p *Project, s *Service, name string, labels []string, aliases bool, mapper PathMapper) []string {
 	if mapper == nil {
 		mapper = identity
 	}
-	args := []string{"run"}
-	if detach {
-		args = append(args, "-d")
+	args := append([]string(nil), command...)
+	args = append(args, "--name", name)
+	for _, label := range labels {
+		args = append(args, "-l", label)
 	}
-
-	args = append(args, "--name", p.ContainerName(s, index))
-	args = append(args, "-l", LabelProject+"="+p.Name)
-	args = append(args, "-l", LabelService+"="+s.Name)
-	args = append(args, "-l", LabelIndex+"="+strconv.Itoa(index))
-	args = append(args, "-l", LabelConfigHash+"="+s.ConfigHash())
 	for _, key := range sortedKeys(s.Labels) {
 		args = append(args, "-l", key+"="+s.Labels[key])
 	}
@@ -66,12 +111,10 @@ func RunArgs(p *Project, s *Service, index int, detach bool, mapper PathMapper) 
 	if len(s.Networks) > 0 {
 		network := s.Networks[0]
 		args = append(args, "--network", network)
-		aliases := map[string]bool{s.Name: true}
-		for _, alias := range s.NetworkAliases[network] {
-			aliases[alias] = true
-		}
-		for _, alias := range sortedKeys(aliases) {
-			args = append(args, "--network-alias", alias)
+		if aliases {
+			for _, alias := range networkAliases(s, network) {
+				args = append(args, "--network-alias", alias)
+			}
 		}
 	}
 

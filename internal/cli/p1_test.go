@@ -4,8 +4,80 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
+
+// callWith reports whether a call contains every part.
+func callWith(calls []string, parts ...string) bool {
+	for _, c := range calls {
+		ok := true
+		for _, p := range parts {
+			ok = ok && strings.Contains(c, p)
+		}
+		if ok {
+			return true
+		}
+	}
+	return false
+}
+
+const multiNetworkProject = `
+name: demo
+services:
+  web:
+    image: nginx
+    networks:
+      front: {aliases: [www]}
+      back:
+networks:
+  front:
+  back:
+`
+
+const multiNetworkListed = "{\"Name\":\"demo_front\"}\n{\"Name\":\"demo_back\"}\n"
+
+func TestUpConnectsEveryNetwork(t *testing.T) {
+	path := writeProject(t, multiNetworkProject)
+	calls := useFake(t,
+		rule{Prefix: "list"},
+		rule{Prefix: "network list", Stdout: multiNetworkListed},
+	)
+	if code := Main([]string{"-f", path, "up", "-d"}); code != 0 {
+		t.Errorf("exit code = %d", code)
+	}
+	got := calls()
+	var order []string
+	for _, c := range got {
+		for _, prefix := range []string{"create", "network connect", "start", "run"} {
+			if strings.HasPrefix(c, prefix) {
+				order = append(order, prefix)
+			}
+		}
+	}
+	if want := []string{"create", "network connect", "start"}; !reflect.DeepEqual(order, want) {
+		t.Errorf("calls = %q, want create, connect, start", got)
+	}
+	if !callWith(got, "create", "--network demo_front", "--network-alias www") ||
+		!anyCall(got, "network connect --network-alias web demo_back demo-web-1") {
+		t.Errorf("networks or aliases missing: %q", got)
+	}
+}
+
+func TestUpRemovesContainerWhenConnectFails(t *testing.T) {
+	path := writeProject(t, multiNetworkProject)
+	calls := useFake(t,
+		rule{Prefix: "list"},
+		rule{Prefix: "network list", Stdout: multiNetworkListed},
+		rule{Prefix: "network connect", Stderr: "boom", Exit: 1},
+	)
+	if code := Main([]string{"-f", path, "up", "-d"}); code != 1 {
+		t.Errorf("exit code = %d, want 1", code)
+	}
+	if got := calls(); !anyCall(got, "remove -f demo-web-1") || anyCall(got, "start") {
+		t.Errorf("a half-connected container must be removed, not started: %q", got)
+	}
+}
 
 func chdir(t *testing.T, dir string) {
 	t.Helper()

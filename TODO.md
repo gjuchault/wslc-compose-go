@@ -64,7 +64,7 @@ Légende :
 
 | Clé | État | Prio |
 |---|---|---|
-| Plusieurs `networks` par service | ⚠️ seul le **premier** réseau est attaché, les autres sont ignorés en silence. Il faut au minimum avertir, ou faire `network connect` si wslc le permet | P1 |
+| Plusieurs `networks` par service | ✅ `create`, `network connect` (avec alias) pour chaque réseau suivant, puis `start` | — |
 | `healthcheck` + `depends_on.condition: service_healthy` | ❌ 🔒 (un polling de `inspect` côté client est possible si wslc expose l'état de santé) | P1 |
 | `depends_on.condition: service_completed_successfully` | ❌ réalisable côté client en attendant l'exit code via `inspect` | P2 |
 | `depends_on.required: false`, `restart: true` | ❌ | P3 |
