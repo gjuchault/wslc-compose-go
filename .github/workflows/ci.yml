@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      - run: go test -v ./...
+      - if: runner.os == 'Linux'
+        run: go test -race ./...
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: test -z "$(gofmt -l .)"
+
+  build:
+    needs: [test, lint]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { goos: windows, goarch: amd64 }
+          - { goos: windows, goarch: arm64 }
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+    env:
+      GOOS: ${{ matrix.goos }}
+      GOARCH: ${{ matrix.goarch }}
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build
+        run: |
+          name="wslc-go_${GOOS}_${GOARCH}"
+          go build -trimpath -ldflags "-s -w" -o "dist/$name/" ./cmd/...
+          cp README.md LICENSE "dist/$name/"
+          cd dist
+          if [ "$GOOS" = windows ]; then zip -qr "$name.zip" "$name"; else tar -czf "$name.tar.gz" "$name"; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wslc-go_${{ matrix.goos }}_${{ matrix.goarch }}
+          path: dist/wslc-go_*.*
+
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish release for the current version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="v$(sed -n 's/^var Version = "\(.*\)"/\1/p' internal/cli/cli.go)"
+          if gh release view "$version" >/dev/null 2>&1; then
+            echo "Release $version already exists; bump cli.Version to publish a new one."
+            exit 0
+          fi
+          (cd dist && sha256sum wslc-go_* > SHA256SUMS)
+          gh release create "$version" dist/* --target "$GITHUB_SHA" --title "$version" --generate-notes
