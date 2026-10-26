@@ -275,16 +275,26 @@ func CaptureJSON(args []string) (any, error) {
 	return decodeJSON(args, res.Stdout)
 }
 
+// decodeJSON decodes a JSON document, or a stream of them: wslc 3 prints one
+// object per line for list and images, which is returned as a list.
 func decodeJSON(args []string, stdout string) (any, error) {
 	text := strings.TrimSpace(stdout)
 	if text == "" {
 		return []any{}, nil
 	}
-	var out any
-	if err := json.Unmarshal([]byte(text), &out); err != nil {
-		return nil, &Error{fmt.Sprintf("unexpected non-JSON output from wslc %s: %v", strings.Join(args, " "), err)}
+	dec := json.NewDecoder(strings.NewReader(text))
+	var values []any
+	for dec.More() {
+		var v any
+		if err := dec.Decode(&v); err != nil {
+			return nil, &Error{fmt.Sprintf("unexpected non-JSON output from wslc %s: %v", strings.Join(args, " "), err)}
+		}
+		values = append(values, v)
 	}
-	return out, nil
+	if len(values) == 1 {
+		return values[0], nil
+	}
+	return values, nil
 }
 
 // --- queries ---------------------------------------------------------------
@@ -297,7 +307,11 @@ func ListProjectContainers(project string) ([]map[string]any, error) {
 	return objects(result), nil
 }
 
+// objects returns the objects of a JSON list, or the object itself.
 func objects(v any) []map[string]any {
+	if m, ok := v.(map[string]any); ok {
+		return []map[string]any{m}
+	}
 	list, _ := v.([]any)
 	var out []map[string]any
 	for _, item := range list {
@@ -371,10 +385,35 @@ func ImageExists(name string) bool {
 	return false
 }
 
-func NetworkNames() ([]string, error) { return namesFromTable([]string{"network", "list"}, "NAME") }
+func NetworkNames() ([]string, error) { return resourceNames("network", "NAME") }
 
-func VolumeNames() ([]string, error) {
-	return namesFromTable([]string{"volume", "list"}, "VOLUME NAME")
+func VolumeNames() ([]string, error) { return resourceNames("volume", "VOLUME NAME") }
+
+// resourceNames lists network or volume names from the JSON output of wslc 3,
+// whose table headers are localized, or from the table of older versions.
+func resourceNames(kind, column string) ([]string, error) {
+	args := []string{kind, "list", "--format", "json"}
+	res, err := Run(args, Opts{Capture: true, NoCheck: true})
+	if err != nil {
+		return nil, err
+	}
+	if res.Code == 0 {
+		if result, err := decodeJSON(args, res.Stdout); err == nil {
+			names := []string{}
+			for _, item := range objects(result) {
+				names = append(names, str(item["Name"]))
+			}
+			return names, nil
+		}
+	}
+	return namesFromTable([]string{kind, "list"}, column)
+}
+
+func str(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
 }
 
 func contains(list []string, s string) bool {

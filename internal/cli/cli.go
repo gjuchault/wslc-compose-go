@@ -161,7 +161,7 @@ type container struct {
 	Hash    string
 	Running bool
 	Status  string
-	Ports   []any
+	Ports   any // a list of port objects, or the text wslc 3 prints
 }
 
 // str renders a JSON scalar as a string ("" for null).
@@ -200,11 +200,14 @@ func projectContainers(project *compose.Project, strict bool, services []string)
 	}
 	var result []container
 	for _, entry := range entries {
-		ref := firstNonEmpty(str(entry["Id"]), str(entry["Name"]))
+		// wslc 3 uses docker's keys: ID, Names, and Ports as a string
+		id := firstNonEmpty(str(entry["Id"]), str(entry["ID"]))
+		entryName := firstNonEmpty(str(entry["Name"]), str(entry["Names"]))
+		ref := firstNonEmpty(id, entryName)
 		data, err := engine.Inspect(ref)
 		if err != nil {
 			err = fmt.Errorf("cannot inspect container %s: %w", ref, err)
-			if strict && belongsTo(project, str(entry["Name"]), services) {
+			if strict && belongsTo(project, entryName, services) {
 				return nil, err
 			}
 			if err := warnUnlessInterrupted(err, "warning: "+err.Error()); err != nil {
@@ -223,10 +226,10 @@ func projectContainers(project *compose.Project, strict bool, services []string)
 			status = str(s)
 		}
 		running, _ := state["Running"].(bool)
-		ports, _ := entry["Ports"].([]any)
+		ports := entry["Ports"]
 		result = append(result, container{
-			ID:      str(entry["Id"]),
-			Name:    firstNonEmpty(str(entry["Name"]), str(data["Name"]), str(entry["Id"])),
+			ID:      id,
+			Name:    firstNonEmpty(entryName, strings.TrimPrefix(str(data["Name"]), "/"), id),
 			Image:   firstNonEmpty(str(entry["Image"]), str(data["Image"])),
 			Service: str(labels[compose.LabelService]),
 			Index:   index,
@@ -277,7 +280,11 @@ func filterContainers(containers []container, services []string) []container {
 	return out
 }
 
-func formatPorts(ports []any) string {
+func formatPorts(v any) string {
+	if text, ok := v.(string); ok {
+		return text
+	}
+	ports, _ := v.([]any)
 	var parts []string
 	for _, p := range ports {
 		port, _ := p.(map[string]any)

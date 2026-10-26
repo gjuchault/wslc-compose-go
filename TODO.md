@@ -113,6 +113,7 @@ Légende :
 
 ## 7. Qualité et outillage
 
+- [x] Compatibilité wslc 3.0.3 : JSON d'une ligne par objet pour `list` et `images`, clés à la docker (`ID`, `Names`), `network list` et `volume list` lus en JSON (les en-têtes du tableau sont traduits).
 - [ ] Tests d'intégration contre un faux `wslc` (binaire de test piloté par variable d'environnement) pour `up`, `down` et `ps`.
 - [ ] Release multi-plateforme (goreleaser : `windows/amd64`, `windows/arm64`, `linux/amd64`, `linux/arm64`).
 - [ ] Module path définitif (`github.com/<owner>/wslc-go`) pour `go install`.

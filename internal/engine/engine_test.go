@@ -85,3 +85,22 @@ func TestInspectRetriesTransientErrors(t *testing.T) {
 		t.Errorf("data=%v err=%v calls=%d", data, err, *calls)
 	}
 }
+
+// wslc 3 prints list and images as one JSON object per line.
+func TestDecodeJSONStream(t *testing.T) {
+	got, err := decodeJSON(nil, "{\"ID\":\"a\"}\r\n{\"ID\":\"b\"}\r\n")
+	if err != nil || len(objects(got)) != 2 || objects(got)[1]["ID"] != "b" {
+		t.Errorf("got %v, %v", got, err)
+	}
+	got, err = decodeJSON(nil, `{"ID":"a"}`)
+	if err != nil || len(objects(got)) != 1 {
+		t.Errorf("a single object is a one-item list for objects: %v, %v", got, err)
+	}
+	got, err = decodeJSON(nil, `[{"ID":"a"},{"ID":"b"}]`)
+	if err != nil || len(objects(got)) != 2 {
+		t.Errorf("a JSON array still works: %v, %v", got, err)
+	}
+	if _, err := decodeJSON(nil, "{\"ID\":\"a\"}\nnot json"); err == nil {
+		t.Error("trailing garbage is an error")
+	}
+}
