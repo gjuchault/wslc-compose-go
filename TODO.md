@@ -117,4 +117,4 @@ Légende :
 - [ ] Tests d'intégration contre un faux `wslc` (binaire de test piloté par variable d'environnement) pour `up`, `down` et `ps`.
 - [ ] Release multi-plateforme (goreleaser : `windows/amd64`, `windows/arm64`, `linux/amd64`, `linux/arm64`).
 - [ ] Module path définitif (`github.com/<owner>/wslc-go`) pour `go install`.
-- [ ] Port de `install.sh` (téléchargement du binaire de release au lieu de pip/uv).
+- [ ] Script d'installation Linux (`install.sh`) : `install.ps1` couvre Windows, Linux n'a qu'un extrait `curl` dans le README.

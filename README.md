@@ -74,6 +74,40 @@ them as workflow artifacts. When `cli.Version` in `internal/cli/cli.go` has no r
 the push also publishes GitHub release `v<Version>` with `SHA256SUMS`. To ship a new
 release, bump that version.
 
+## Update
+
+Re-run the install command: it downloads the latest release over the previous binaries.
+The PATH entry and the `wslc` alias are kept (not duplicated). Stop any running
+`wslc-compose` first, such as an `up` attached to the logs: Windows cannot replace an
+executable in use.
+
+Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/gjuchault/wslc-compose-go/main/install.ps1 | iex
+wslc-compose --version
+```
+
+To move to (or back to) a given version:
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/gjuchault/wslc-compose-go/main/install.ps1))) -Version v0.3.0
+```
+
+Linux / inside a WSL distro:
+
+```sh
+arch=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+curl -fsSL "https://github.com/gjuchault/wslc-compose-go/releases/latest/download/wslc-go_linux_$arch.tar.gz" \
+  | tar -xz -C ~/.local/bin --strip-components=1 --wildcards '*/wslc*'
+wslc-compose --version
+```
+
+From source: `git pull`, then rebuild with `go build -o bin/ ./cmd/...`.
+
+The [releases page](https://github.com/gjuchault/wslc-compose-go/releases) lists the
+changes of each version.
+
 ## Quick start
 
 ```sh

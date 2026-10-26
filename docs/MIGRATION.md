@@ -60,9 +60,22 @@ this to map each container to a compose service and to know what to stop in step
 
 ## Step 2 — Install wslc-compose and prepare the compose file
 
-```console
-curl -fsSL https://raw.githubusercontent.com/bacarndiaye/wslc-compose/main/install.sh | sh
+From Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/gjuchault/wslc-compose-go/main/install.ps1 | iex
 ```
+
+Or inside a WSL distro, into `~/.local/bin`:
+
+```sh
+arch=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+mkdir -p ~/.local/bin
+curl -fsSL "https://github.com/gjuchault/wslc-compose-go/releases/latest/download/wslc-go_linux_$arch.tar.gz" \
+  | tar -xz -C ~/.local/bin --strip-components=1 --wildcards '*/wslc*'
+```
+
+See the [README](../README.md#install) for the options.
 
 If you already have a `docker-compose.yml` from Docker/Podman days, use it **unchanged**.
 Otherwise write one service per container from your step 1 inventory.
